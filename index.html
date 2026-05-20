@@ -548,6 +548,61 @@
   body.dark .badge-human { background: rgba(34,168,93,0.14); border-color: rgba(34,168,93,0.25); }
   body.dark .badge-uncertain { background: rgba(224,155,48,0.14); border-color: rgba(224,155,48,0.25); }
 
+  /* Toast notification */
+  .toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-120px);
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: var(--blur);
+    backdrop-filter: var(--blur);
+    border: 1px solid var(--glass-border-strong);
+    border-radius: var(--radius);
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    box-shadow: var(--glass-shadow-lg);
+    z-index: 1000;
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    pointer-events: none;
+    text-align: center;
+    max-width: 90vw;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.warning { border-color: var(--amber); background: var(--amber-bg); }
+
+  /* Loading spinner */
+  .spinner-wrap {
+    display: none;
+    text-align: center;
+    padding: 24px;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+  .spinner-wrap.active { display: block; }
+  .spinner {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    border: 3px solid rgba(128,128,128,0.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-bottom: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Limit warning */
+  .limit-warning {
+    display: none;
+    font-size: 12px;
+    color: var(--amber);
+    margin-top: 4px;
+  }
+  .limit-warning.show { display: block; }
+
   /* Responsive */
   @media (max-width: 480px) {
     .container { padding: 24px 16px 60px; }
@@ -565,6 +620,9 @@
 </head>
 <body>
 <div class="container">
+
+  <!-- Toast notification -->
+  <div class="toast" id="toast"></div>
 
   <header>
     <button id="theme-toggle" class="theme-toggle" type="button" title="切换深色模式">&#9789;</button>
@@ -618,11 +676,18 @@
     <div class="card">
       <div class="card-title">输入需要检测的文本</div>
       <textarea id="text-input" placeholder="在此粘贴文本（建议至少 100 字以获得更准确的结果）..."></textarea>
+      <div class="limit-warning" id="limit-warning">⚠ 文本过长（超过 5000 字符），分析可能需要较长时间，建议缩短文本</div>
       <div style="display:flex;align-items:center;">
         <button class="btn" id="btn-analyze-text" type="button">开始分析</button>
         <button class="btn btn-ghost" id="btn-clear-text" type="button">清空</button>
         <span style="margin-left:auto;font-size:12px;color:var(--text-secondary)" id="char-count">0 字</span>
       </div>
+    </div>
+
+    <!-- Loading -->
+    <div class="spinner-wrap" id="spinner-wrap">
+      <div class="spinner"></div>
+      <div>正在分析中...</div>
     </div>
 
     <!-- Text Results -->
@@ -647,6 +712,9 @@
   var SCORE_IMG = { AI: 70, UNCERTAIN: 40 };
   var SCORE_TEXT = { AI: 60, UNCERTAIN: 35 };
   var MIN_TEXT_LENGTH = 20;
+  var MAX_TEXT_LENGTH = 5000;
+  var MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+  var JPEG_MAX_ITERATIONS = 5000;
 
   var AI_SIGNATURES = [
     'DALL-E', 'DALL·E', 'Midjourney', 'Stable Diffusion',
@@ -709,10 +777,28 @@
     textDetails: $('text-details'),
     panelImage: $('panel-image'),
     panelText: $('panel-text'),
+    toast: $('toast'),
+    spinnerWrap: $('spinner-wrap'),
+    limitWarning: $('limit-warning'),
+    btnAnalyzeText: $('btn-analyze-text'),
   };
 
   // ==================== Utilities ====================
   var decoder = new TextDecoder();
+
+  var toastTimer = 0;
+
+  function showToast(msg, isWarning) {
+    clearTimeout(toastTimer);
+    els.toast.textContent = msg;
+    els.toast.className = 'toast' + (isWarning ? ' warning' : '');
+    // Force reflow
+    els.toast.offsetHeight;
+    els.toast.classList.add('show');
+    toastTimer = setTimeout(function() {
+      els.toast.classList.remove('show');
+    }, 3000);
+  }
 
   function readTextHead(buf, maxLen) {
     return decoder.decode(buf.slice(0, Math.min(maxLen, buf.length)));
@@ -824,6 +910,11 @@
   });
 
   function processImage(file) {
+    if (file.size > MAX_FILE_SIZE) {
+      showToast('文件过大（' + formatSize(file.size) + '），请上传小于 20MB 的图片', true);
+      return;
+    }
+
     // Preview via blob URL (avoids double FileReader)
     els.imgPreview.innerHTML =
       '<img src="' + URL.createObjectURL(file) + '" class="preview-img" alt="预览">' +
@@ -835,9 +926,14 @@
       : parseGeneric;
 
     readFileAsArrayBuffer(file).then(function(buf) {
-      var findings = parser(buf);
-      displayImageResults(findings, file);
-      renderChecklist();
+      try {
+        var findings = parser(buf);
+        displayImageResults(findings, file);
+        renderChecklist();
+      } catch (e) {
+        els.imgPreview.innerHTML +=
+          '<p style="color:var(--red);font-size:13px;margin-top:8px;">解析失败：' + e.message + '</p>';
+      }
     }).catch(function(err) {
       els.imgPreview.innerHTML +=
         '<p style="color:var(--red);font-size:13px;margin-top:8px;">读取失败：' + err.message + '</p>';
@@ -863,13 +959,17 @@
     var findings = [];
     var dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     var offset = 2; // skip SOI
+    var iterations = 0;
 
-    while (offset < buf.length - 1) {
+    while (offset < buf.length - 1 && iterations < JPEG_MAX_ITERATIONS) {
+      iterations++;
       if (buf[offset] !== 0xFF) break;
       var marker = buf[offset + 1];
       if (marker === 0xDA) break; // SOS
 
+      if (offset + 4 > buf.length) break;
       var len = (marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) ? 0 : dv.getUint16(offset + 2);
+      if (len < 0 || offset + 2 + len > buf.length) break;
 
       if (marker === 0xE1) { // APP1 - EXIF or XMP
         var header = decoder.decode(buf.slice(offset + 4, offset + 10));
@@ -1068,26 +1168,45 @@
 
   // ==================== Text Detection ====================
   els.textInput.addEventListener('input', function() {
-    els.charCount.textContent = this.value.length + ' 字';
+    var len = this.value.length;
+    els.charCount.textContent = len + ' 字';
+    if (len > MAX_TEXT_LENGTH) {
+      els.limitWarning.classList.add('show');
+    } else {
+      els.limitWarning.classList.remove('show');
+    }
   });
 
   $('btn-clear-text').addEventListener('click', function() {
     els.textInput.value = '';
     els.charCount.textContent = '0 字';
     els.cardTextResults.style.display = 'none';
+    els.limitWarning.classList.remove('show');
   });
 
-  $('btn-analyze-text').addEventListener('click', analyzeText);
-
-  function analyzeText() {
+  $('btn-analyze-text').addEventListener('click', function() {
     var text = els.textInput.value.trim();
     if (text.length < MIN_TEXT_LENGTH) {
-      alert('请至少输入 ' + MIN_TEXT_LENGTH + ' 个字符以获得有意义的分析结果。');
+      showToast('请至少输入 ' + MIN_TEXT_LENGTH + ' 个字符以获得有意义的分析结果', true);
+      return;
+    }
+    if (text.length > MAX_TEXT_LENGTH * 2) {
+      showToast('文本过长（' + text.length + ' 字符），请缩短至 ' + (MAX_TEXT_LENGTH * 2) + ' 字符以内', true);
       return;
     }
 
-    els.cardTextResults.style.display = 'block';
+    // Show loading state
+    els.spinnerWrap.classList.add('active');
+    els.btnAnalyzeText.disabled = true;
+    els.cardTextResults.style.display = 'none';
 
+    // Defer analysis to next frame so loading spinner renders
+    requestAnimationFrame(function() {
+      analyzeText(text);
+    });
+  });
+
+  function analyzeText(text) {
     var words = text.split(/[\s,，。！？、；：""''（）\(\)\[\]{}…—\-\/\\]+/).filter(function(w) { return w.length > 0; });
     var sentences = text.split(/[。！？!?\n]+/).filter(function(s) { return s.trim().length > 0; });
 
@@ -1105,17 +1224,7 @@
     var sentStd = Math.sqrt(sentVar);
     var burstiness = avgSentLen > 0 ? sentStd / avgSentLen : 0;
 
-    // 3. Repetition: find repeated 3-grams
-    var trigrams = new Map();
-    for (var i = 0; i <= words.length - 3; i++) {
-      var tri = words.slice(i, i + 3).map(function(w) { return w.toLowerCase(); }).join(' ');
-      trigrams.set(tri, (trigrams.get(tri) || 0) + 1);
-    }
-    var repeatedTri = 0;
-    trigrams.forEach(function(v) { if (v >= 3) repeatedTri++; });
-    var repetitionScore = words.length > 0 ? repeatedTri / (words.length / 3) : 0;
-
-    // 4. AI phrase detection
+    // 4. AI phrase detection (do before trigrams - it's fast)
     var textLower = text.toLowerCase();
     var phraseHits = 0;
     for (var p = 0; p < AI_PHRASES.length; p++) {
@@ -1130,62 +1239,101 @@
     var wordLenStd = Math.sqrt(wordLenVar);
     var wordLenCV = avgWordLen > 0 ? wordLenStd / avgWordLen : 0;
 
-    // -- Scoring --
-    var ttrScore = Math.max(0, (0.5 - ttr) * 2) * 100;
-    var burstScore = Math.max(0, (0.8 - burstiness) / 0.8) * 100;
-    var repScore = Math.min(repetitionScore * 100, 100);
-    var phraseScore = Math.min(phraseDensity * 30, 100);
-    var wlScore = Math.max(0, (0.5 - wordLenCV) / 0.5) * 100;
+    // 3. Repetition: find repeated 3-grams (chunked async to avoid blocking)
+    var TRIGRAM_CHUNK = 800;
+    var trigrams = new Map();
+    var trigramIndex = 0;
+    var maxIndex = words.length - 3;
 
-    var scores = [
-      { name: '词汇多样性偏低', value: Math.round(ttrScore), color: scoreColor(ttrScore, SCORE_TEXT) },
-      { name: '句式变化度偏低', value: Math.round(burstScore), color: scoreColor(burstScore, SCORE_TEXT) },
-      { name: '高频重复模式', value: Math.round(repScore), color: scoreColor(repScore, SCORE_TEXT) },
-      { name: 'AI 常用短语', value: Math.round(phraseScore), color: scoreColor(phraseScore, SCORE_TEXT) },
-      { name: '词长变化度偏低', value: Math.round(wlScore), color: scoreColor(wlScore, SCORE_TEXT) },
-    ];
+    function processChunk() {
+      var end = Math.min(trigramIndex + TRIGRAM_CHUNK, maxIndex);
+      for (var i = trigramIndex; i <= end; i++) {
+        var tri = words[i].toLowerCase() + ' ' + words[i + 1].toLowerCase() + ' ' + words[i + 2].toLowerCase();
+        trigrams.set(tri, (trigrams.get(tri) || 0) + 1);
+      }
+      trigramIndex = end + 1;
 
-    var overallScore = Math.round(scores.reduce(function(s, sc) { return s + sc.value; }, 0) / scores.length);
+      if (trigramIndex <= maxIndex) {
+        setTimeout(processChunk, 0);
+      } else {
+        finishAnalysis();
+      }
+    }
 
-    // -- Display --
-    var metricsHTML = '';
-    scores.forEach(function(s) {
-      metricsHTML += '<div class="metric">' +
-        '<div class="metric-header">' +
-          '<span class="metric-name">' + s.name + '</span>' +
-          '<span class="metric-value" style="color:' + s.color + '">' + s.value + '%</span>' +
-        '</div>' +
-        '<div class="metric-bar"><div class="metric-fill" style="width:' + s.value + '%;background:' + s.color + '"></div></div>' +
+    function finishAnalysis() {
+      var repeatedTri = 0;
+      trigrams.forEach(function(v) { if (v >= 3) repeatedTri++; });
+      var repetitionScore = words.length > 0 ? repeatedTri / (words.length / 3) : 0;
+
+      // -- Scoring --
+      var ttrScore = Math.max(0, (0.5 - ttr) * 2) * 100;
+      var burstScore = Math.max(0, (0.8 - burstiness) / 0.8) * 100;
+      var repScore = Math.min(repetitionScore * 100, 100);
+      var phraseScore = Math.min(phraseDensity * 30, 100);
+      var wlScore = Math.max(0, (0.5 - wordLenCV) / 0.5) * 100;
+
+      var scores = [
+        { name: '词汇多样性偏低', value: Math.round(ttrScore), color: scoreColor(ttrScore, SCORE_TEXT) },
+        { name: '句式变化度偏低', value: Math.round(burstScore), color: scoreColor(burstScore, SCORE_TEXT) },
+        { name: '高频重复模式', value: Math.round(repScore), color: scoreColor(repScore, SCORE_TEXT) },
+        { name: 'AI 常用短语', value: Math.round(phraseScore), color: scoreColor(phraseScore, SCORE_TEXT) },
+        { name: '词长变化度偏低', value: Math.round(wlScore), color: scoreColor(wlScore, SCORE_TEXT) },
+      ];
+
+      var overallScore = Math.round(scores.reduce(function(s, sc) { return s + sc.value; }, 0) / scores.length);
+
+      // -- Display --
+      var metricsHTML = '';
+      scores.forEach(function(s) {
+        metricsHTML += '<div class="metric">' +
+          '<div class="metric-header">' +
+            '<span class="metric-name">' + s.name + '</span>' +
+            '<span class="metric-value" style="color:' + s.color + '">' + s.value + '%</span>' +
+          '</div>' +
+          '<div class="metric-bar"><div class="metric-fill" style="width:' + s.value + '%;background:' + s.color + '"></div></div>' +
+        '</div>';
+      });
+
+      metricsHTML += '<div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(128,128,128,0.15);font-size:13px;color:var(--text-secondary)">' +
+        '总字数: ' + text.length + ' &nbsp;|&nbsp; 词汇数: ' + words.length + ' &nbsp;|&nbsp;' +
+        '独立词汇: ' + uniqueWords.size + ' &nbsp;|&nbsp; 句子数: ' + sentences.length + ' &nbsp;|&nbsp;' +
+        'TTR: ' + ttr.toFixed(3) + ' &nbsp;|&nbsp; Burstiness: ' + burstiness.toFixed(3) +
       '</div>';
-    });
 
-    metricsHTML += '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;color:var(--text-secondary)">' +
-      '总字数: ' + text.length + ' &nbsp;|&nbsp; 词汇数: ' + words.length + ' &nbsp;|&nbsp;' +
-      '独立词汇: ' + uniqueWords.size + ' &nbsp;|&nbsp; 句子数: ' + sentences.length + ' &nbsp;|&nbsp;' +
-      'TTR: ' + ttr.toFixed(3) + ' &nbsp;|&nbsp; Burstiness: ' + burstiness.toFixed(3) +
-    '</div>';
+      els.textMetrics.innerHTML = metricsHTML;
 
-    els.textMetrics.innerHTML = metricsHTML;
+      // Score bar
+      els.textScoreBar.style.width = overallScore + '%';
+      els.textScoreBar.style.background = scoreColor(overallScore, SCORE_TEXT);
 
-    // Score bar
-    els.textScoreBar.style.width = overallScore + '%';
-    els.textScoreBar.style.background = scoreColor(overallScore, SCORE_TEXT);
+      // Verdict
+      var v = renderVerdict(overallScore, SCORE_TEXT, {
+        ai: '高概率 AI 生成',
+        uncertain: '不确定',
+        human: '更像人类写作'
+      });
+      els.textVerdict.innerHTML = v.html;
+      els.textVerdict.style.color = v.color;
 
-    // Verdict
-    var v = renderVerdict(overallScore, SCORE_TEXT, {
-      ai: '高概率 AI 生成',
-      uncertain: '不确定',
-      human: '更像人类写作'
-    });
-    els.textVerdict.innerHTML = v.html;
-    els.textVerdict.style.color = v.color;
+      var details = overallScore >= SCORE_TEXT.AI ? '文本在词汇多样性、句式变化度等多个维度上呈现 AI 写作的典型特征。注意：本分析仅为启发式判断，不能作为绝对依据。'
+        : overallScore >= SCORE_TEXT.UNCERTAIN ? '文本部分指标接近 AI 写作特征，但不足以做出确定性判断。建议结合其他方法交叉验证。'
+        : '文本在各项指标上表现接近人类写作特征。注意：熟练的提示工程可以绕过检测。';
+      els.textDetails.textContent = details;
 
-    var details = overallScore >= SCORE_TEXT.AI ? '文本在词汇多样性、句式变化度等多个维度上呈现 AI 写作的典型特征。注意：本分析仅为启发式判断，不能作为绝对依据。'
-      : overallScore >= SCORE_TEXT.UNCERTAIN ? '文本部分指标接近 AI 写作特征，但不足以做出确定性判断。建议结合其他方法交叉验证。'
-      : '文本在各项指标上表现接近人类写作特征。注意：熟练的提示工程可以绕过检测。';
-    els.textDetails.textContent = details;
+      // Hide loading, show results
+      els.spinnerWrap.classList.remove('active');
+      els.btnAnalyzeText.disabled = false;
+      els.cardTextResults.style.display = 'block';
+      els.cardTextResults.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
 
-    els.cardTextResults.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Start chunked processing
+    if (maxIndex >= 0) {
+      processChunk();
+    } else {
+      // Not enough words for trigrams
+      finishAnalysis();
+    }
   }
 
 })();
