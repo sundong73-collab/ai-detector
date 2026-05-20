@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 内容检测器</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --card: #ffffff;
+    --text: #1c1917;
+    --text-secondary: #78716c;
+    --border: #e7e5e4;
+    --border-subtle: #f5f5f4;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-bg: #eff6ff;
+    --red: #dc2626;
+    --green: #16a34a;
+    --amber: #d97706;
+    --radius: 12px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+    --ls-tight: -0.02em;
+    --ls-text: -0.01em;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* Header */
+  header {
+    text-align: center;
+    padding: 60px 0 40px;
+  }
+  header h1 {
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: var(--ls-tight);
+    color: var(--text);
+  }
+  header p {
+    color: var(--text-secondary);
+    font-size: 15px;
+    margin-top: 8px;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 32px;
+    background: var(--card);
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 12px 24px;
+    border: none;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    letter-spacing: var(--ls-text);
+  }
+  .tab-btn:hover { color: var(--text); background: var(--border-subtle); }
+  .tab-btn.active {
+    color: var(--accent);
+    background: var(--accent-bg);
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  /* Panels */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    box-shadow: var(--shadow);
+  }
+  .card + .card { margin-top: 16px; }
+
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    letter-spacing: var(--ls-text);
+  }
+
+  /* Drop zone */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--bg);
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+  }
+  .drop-zone .icon { font-size: 36px; margin-bottom: 12px; opacity: 0.6; }
+  .drop-zone p { color: var(--text-secondary); font-size: 14px; }
+  .drop-zone .hint { font-size: 12px; margin-top: 4px; opacity: 0.5; }
+
+  .preview-img {
+    max-width: 100%;
+    max-height: 320px;
+    border-radius: 8px;
+    margin-top: 16px;
+    border: 1px solid var(--border);
+  }
+
+  /* Results */
+  .result-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 14px;
+  }
+  .result-row:last-child { border-bottom: none; }
+  .result-label { color: var(--text-secondary); }
+  .result-value { font-weight: 500; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .badge-ai { background: #fef2f2; color: var(--red); }
+  .badge-human { background: #f0fdf4; color: var(--green); }
+  .badge-uncertain { background: #fffbeb; color: var(--amber); }
+
+  /* Score bar */
+  .score-bar-wrap {
+    height: 8px;
+    background: var(--border-subtle);
+    border-radius: 4px;
+    margin-top: 16px;
+    overflow: hidden;
+  }
+  .score-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.6s ease, background 0.6s ease;
+  }
+
+  .verdict {
+    text-align: center;
+    padding: 20px 0 8px;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: var(--ls-text);
+  }
+
+  /* Text input */
+  textarea {
+    width: 100%;
+    min-height: 180px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    line-height: 1.7;
+    background: var(--bg);
+    transition: border-color 0.2s;
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--card);
+  }
+  textarea::placeholder { color: #b0adab; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 12px;
+    transition: background 0.2s;
+    font-family: inherit;
+    letter-spacing: var(--ls-text);
+  }
+  .btn:hover { background: var(--accent-hover); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    margin-left: 8px;
+  }
+  .btn-ghost:hover { background: var(--border-subtle); color: var(--text); }
+
+  /* Manual checklist */
+  .checklist { list-style: none; }
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+    user-select: none;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .check-box {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    margin-top: 1px;
+  }
+  .check-box.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-size: 12px;
+  }
+  .check-hint {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  /* Score breakdown */
+  .metric {
+    margin-bottom: 16px;
+  }
+  .metric-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .metric-name { color: var(--text-secondary); }
+  .metric-value { font-weight: 500; }
+  .metric-bar {
+    height: 4px;
+    background: var(--border-subtle);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .metric-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.6s ease;
+  }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 40px 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    opacity: 0.6;
+  }
+
+  .file-name {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    text-align: center;
+  }
+
+  /* Responsive */
+  @media (max-width: 480px) {
+    .container { padding: 24px 16px 60px; }
+    header { padding: 40px 0 28px; }
+    header h1 { font-size: 24px; }
+    .card { padding: 20px; }
+    .tab-btn { padding: 10px 16px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>AI 内容检测器</h1>
+    <p>检测图片与文本是否由 AI 生成 — 一切分析均在本地完成，不上传数据</p>
+  </header>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="image">图片检测</button>
+    <button class="tab-btn" data-tab="text">文本检测</button>
+  </div>
+
+  <!-- ========== Image Panel ========== -->
+  <div class="panel active" id="panel-image">
+
+    <!-- Upload -->
+    <div class="card">
+      <div class="drop-zone" id="drop-zone">
+        <div class="icon">&#128247;</div>
+        <p>拖拽图片到此处 或 点击上传</p>
+        <p class="hint">支持 JPG / PNG / WebP / AVIF</p>
+      </div>
+      <input type="file" id="file-input" accept="image/*" hidden>
+      <div id="img-preview"></div>
+    </div>
+
+    <!-- Metadata Results -->
+    <div class="card" id="card-metadata" style="display:none">
+      <div class="card-title">元数据分析</div>
+      <div id="metadata-results"></div>
+      <div class="score-bar-wrap"><div class="score-bar-fill" id="img-score-bar" style="width:0%"></div></div>
+      <div class="verdict" id="img-verdict"></div>
+    </div>
+
+    <!-- Manual Checklist -->
+    <div class="card" id="card-checklist" style="display:none">
+      <div class="card-title">人工辨别清单 <span style="font-weight:400;font-size:12px;color:var(--text-secondary)">— 点击标记可疑项</span></div>
+      <ul class="checklist" id="checklist"></ul>
+      <div style="margin-top:12px;font-size:13px;color:var(--text-secondary)">
+        已标记 <strong id="check-count">0</strong> / <span id="check-total">0</span> 项
+        &mdash; 标记越多，越可疑
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ========== Text Panel ========== -->
+  <div class="panel" id="panel-text">
+
+    <div class="card">
+      <div class="card-title">输入需要检测的文本</div>
+      <textarea id="text-input" placeholder="在此粘贴文本（建议至少 100 字以获得更准确的结果）..."></textarea>
+      <div style="display:flex;align-items:center;">
+        <button class="btn" id="btn-analyze-text">开始分析</button>
+        <button class="btn btn-ghost" id="btn-clear-text">清空</button>
+        <span style="margin-left:auto;font-size:12px;color:var(--text-secondary)" id="char-count">0 字</span>
+      </div>
+    </div>
+
+    <!-- Text Results -->
+    <div class="card" id="card-text-results" style="display:none">
+      <div class="card-title">分析结果</div>
+      <div id="text-metrics"></div>
+      <div class="score-bar-wrap"><div class="score-bar-fill" id="text-score-bar" style="width:0%"></div></div>
+      <div class="verdict" id="text-verdict"></div>
+      <div id="text-details" style="font-size:13px;color:var(--text-secondary);margin-top:8px;"></div>
+    </div>
+
+  </div>
+
+  <footer>所有检测均在浏览器本地完成，不会上传任何数据</footer>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ==================== Constants ====================
+  var SCORE_IMG = { AI: 70, UNCERTAIN: 40 };
+  var SCORE_TEXT = { AI: 60, UNCERTAIN: 35 };
+  var MIN_TEXT_LENGTH = 20;
+
+  var AI_SIGNATURES = [
+    'DALL-E', 'DALL·E', 'Midjourney', 'Stable Diffusion',
+    'Adobe Firefly', 'NovelAI', 'Leonardo AI', 'Ideogram',
+    'c2pa', 'content_credentials', 'AI-generated',
+    'generated by AI', 'Generated with AI',
+  ];
+
+  var CHECKLIST_ITEMS = [
+    { text: '手指数量异常或手指融合', hint: 'AI 常画错手指，出现 6 根、4 根或手指粘连' },
+    { text: '图片中的文字是乱码/伪文字', hint: 'AI 生成的文字通常像梦里看到的字，看不清具体内容' },
+    { text: '皮肤/表面过于光滑，像塑料', hint: 'AI 生成的人像皮肤常没有毛孔和纹理' },
+    { text: '物体边缘模糊不规则', hint: '前景和背景之间可能出现不自然的融合' },
+    { text: '左右不对称（眼镜、耳环等）', hint: '眼镜框两边形状不同，或耳环只戴一边' },
+    { text: '光源方向矛盾', hint: '阴影和高光的方向互相矛盾' },
+    { text: '背景人物脸部扭曲', hint: '远处的人脸通常严重变形或模糊' },
+    { text: '头发纹理不自然、乱窜', hint: '发丝走向不合理，或消失在背景中' },
+  ];
+
+  var AI_PHRASES = [
+    'it is important to note', 'it is worth noting', 'it is crucial to',
+    'in conclusion', 'however, it is', 'furthermore', 'moreover',
+    'as an AI', 'as a language model', 'I apologize', 'I cannot',
+    'it is essential to', 'plays a crucial role', 'in today\'s world',
+    'in summary', 'first and foremost', 'last but not least',
+    '值得注意的是', '综上所述', '总而言之', '毫无疑问',
+    '扮演着重要角色', '在当今世界', '首先，', '最后，',
+    '需要强调的是', '不可否认', '显而易见',
+    '此外，', '因此，', '然而，', '并且，',
+  ];
+
+  var EXIF_TAGS = {
+    0x010E: '图片描述', 0x010F: '设备制造商', 0x0110: '设备型号',
+    0x0131: '软件', 0x0132: '修改时间', 0x013B: '作者',
+    0x8298: '版权', 0x9286: '用户备注', 0x9C9B: 'XMP 标签',
+    0x9C9C: 'XMP 注释', 0xA002: '图片宽度', 0xA003: '图片高度',
+  };
+
+  // ==================== DOM References ====================
+  var $ = function(id) { return document.getElementById(id); };
+
+  var els = {
+    dropZone: $('drop-zone'),
+    fileInput: $('file-input'),
+    imgPreview: $('img-preview'),
+    cardMetadata: $('card-metadata'),
+    cardChecklist: $('card-checklist'),
+    metadataResults: $('metadata-results'),
+    imgScoreBar: $('img-score-bar'),
+    imgVerdict: $('img-verdict'),
+    checklist: $('checklist'),
+    checkCount: $('check-count'),
+    checkTotal: $('check-total'),
+    textInput: $('text-input'),
+    charCount: $('char-count'),
+    cardTextResults: $('card-text-results'),
+    textMetrics: $('text-metrics'),
+    textScoreBar: $('text-score-bar'),
+    textVerdict: $('text-verdict'),
+    textDetails: $('text-details'),
+    panelImage: $('panel-image'),
+    panelText: $('panel-text'),
+  };
+
+  // ==================== Utilities ====================
+  var decoder = new TextDecoder();
+
+  function readTextHead(buf, maxLen) {
+    return decoder.decode(buf.slice(0, Math.min(maxLen, buf.length)));
+  }
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  function scoreColor(score, thresholds) {
+    if (score >= thresholds.AI) return 'var(--red)';
+    if (score >= thresholds.UNCERTAIN) return 'var(--amber)';
+    return 'var(--green)';
+  }
+
+  function renderVerdict(score, thresholds, labels) {
+    var color = score >= thresholds.AI ? 'var(--red)'
+      : score >= thresholds.UNCERTAIN ? 'var(--amber)'
+      : 'var(--green)';
+    var badge = score >= thresholds.AI ? 'badge-ai'
+      : score >= thresholds.UNCERTAIN ? 'badge-uncertain'
+      : 'badge-human';
+    var text = score >= thresholds.AI ? labels.ai
+      : score >= thresholds.UNCERTAIN ? labels.uncertain
+      : labels.human;
+    return { html: '<span class="badge ' + badge + '">' + text + '</span>', color: color };
+  }
+
+  function readFileAsArrayBuffer(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function(e) { resolve(new Uint8Array(e.target.result)); };
+      reader.onerror = function() { reject(new Error('文件读取失败')); };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  // ==================== Tab Switching ====================
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(function(b) { return b.classList.remove('active'); });
+      document.querySelectorAll('.panel').forEach(function(p) { return p.classList.remove('active'); });
+      btn.classList.add('active');
+      $('panel-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // ==================== Image Detection ====================
+  var checklistChecked = new Set();
+
+  // Drag & drop
+  els.dropZone.addEventListener('click', function() { els.fileInput.click(); });
+  els.dropZone.addEventListener('dragover', function(e) { e.preventDefault(); els.dropZone.classList.add('drag-over'); });
+  els.dropZone.addEventListener('dragleave', function() { els.dropZone.classList.remove('drag-over'); });
+  els.dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    els.dropZone.classList.remove('drag-over');
+    var file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) processImage(file);
+  });
+
+  els.fileInput.addEventListener('change', function() {
+    var file = els.fileInput.files[0];
+    if (file) processImage(file);
+  });
+
+  // Delegated checklist listener
+  els.checklist.addEventListener('click', function(e) {
+    var li = e.target.closest('li');
+    if (!li) return;
+    var idx = li.dataset.index;
+    var box = li.querySelector('.check-box');
+    if (checklistChecked.has(idx)) {
+      checklistChecked.delete(idx);
+      box.classList.remove('checked');
+    } else {
+      checklistChecked.add(idx);
+      box.classList.add('checked');
+    }
+    els.checkCount.textContent = checklistChecked.size;
+  });
+
+  function processImage(file) {
+    // Preview via blob URL (avoids double FileReader)
+    els.imgPreview.innerHTML =
+      '<img src="' + URL.createObjectURL(file) + '" class="preview-img" alt="预览">' +
+      '<p class="file-name">' + file.name + ' (' + formatSize(file.size) + ')</p>';
+
+    var ext = file.name.split('.').pop().toLowerCase();
+    var parser = ext === 'jpg' || ext === 'jpeg' ? parseJPEG
+      : ext === 'png' ? parsePNG
+      : parseGeneric;
+
+    readFileAsArrayBuffer(file).then(function(buf) {
+      var findings = parser(buf);
+      displayImageResults(findings, file);
+      renderChecklist();
+    }).catch(function(err) {
+      els.imgPreview.innerHTML +=
+        '<p style="color:var(--red);font-size:13px;margin-top:8px;">读取失败：' + err.message + '</p>';
+    });
+  }
+
+  function checkAIKeywords(text, findings) {
+    var lower = text.toLowerCase();
+    for (var i = 0; i < AI_SIGNATURES.length; i++) {
+      if (lower.indexOf(AI_SIGNATURES[i].toLowerCase()) !== -1) {
+        findings.push({ label: 'AI 工具签名', value: '发现 "' + AI_SIGNATURES[i] + '" 标记', isAi: true });
+        return;
+      }
+    }
+  }
+
+  function isAITool(str) {
+    return /DALL.?E|Midjourney|Stable.?Diffusion|Firefly|NovelAI|Leonardo|Ideogram|AI.?Generated|Diffusion|GAN/i.test(str);
+  }
+
+  // -- JPEG EXIF / XMP parsing --
+  function parseJPEG(buf) {
+    var findings = [];
+    var dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    var offset = 2; // skip SOI
+
+    while (offset < buf.length - 1) {
+      if (buf[offset] !== 0xFF) break;
+      var marker = buf[offset + 1];
+      if (marker === 0xDA) break; // SOS
+
+      var len = (marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) ? 0 : dv.getUint16(offset + 2);
+
+      if (marker === 0xE1) { // APP1 - EXIF or XMP
+        var header = decoder.decode(buf.slice(offset + 4, offset + 10));
+        if (header === 'Exif  ') {
+          parseEXIF(buf.slice(offset + 10, offset + 2 + len), findings);
+        } else if (header.indexOf('http://ns.adobe.com/xap/1.0/') === 0) {
+          parseXMP(buf.slice(offset + 4, offset + 2 + len), findings);
+        }
+      } else if (marker === 0xEB) { // APP11 - JUMBF / C2PA
+        var chunk = decoder.decode(buf.slice(offset + 4, Math.min(offset + 24, offset + 2 + len)));
+        if (chunk.indexOf('JUMBF') !== -1 || chunk.indexOf('c2pa') !== -1 || chunk.indexOf('jumb') !== -1) {
+          findings.push({ label: 'C2PA/JUMBF 数据', value: '发现 C2PA 容器', isAi: true });
+        }
+      }
+
+      offset += 2 + len;
+    }
+
+    var textChunk = readTextHead(buf, 4096);
+    checkAIKeywords(textChunk, findings);
+    findings.push.apply(findings, checkEXIFConsistency(buf));
+    return findings;
+  }
+
+  function parseEXIF(exifBuf, findings) {
+    if (exifBuf.length < 8) return;
+    var dv = new DataView(exifBuf.buffer, exifBuf.byteOffset, exifBuf.byteLength);
+
+    var tiffHeader = decoder.decode(exifBuf.slice(0, 4));
+    var littleEndian;
+    if (tiffHeader === 'II* ') littleEndian = true;
+    else if (tiffHeader === 'MM *') littleEndian = false;
+    else return;
+
+    var ifd0 = dv.getUint32(4, littleEndian);
+    readIFD(exifBuf, ifd0, littleEndian, findings);
+  }
+
+  function readIFD(buf, offset, le, findings) {
+    var dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    if (offset + 2 > buf.length) return;
+    var count = dv.getUint16(offset, le);
+
+    for (var i = 0; i < count && offset + 2 + i * 12 + 12 <= buf.length; i++) {
+      var pos = offset + 2 + i * 12;
+      var tag = dv.getUint16(pos, le);
+      var type = dv.getUint16(pos + 2, le);
+      var num = dv.getUint32(pos + 4, le);
+
+      var typeSizes = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8 };
+      var typeSize = typeSizes[type] || 1;
+      var total = num * typeSize;
+
+      var value;
+      if (total <= 4) {
+        value = buf.slice(pos + 8, pos + 8 + total);
+      } else {
+        var valOff = dv.getUint32(pos + 8, le);
+        value = buf.slice(valOff, valOff + total);
+      }
+
+      if (type === 2) { // ASCII
+        var str = decoder.decode(value).replace(/\0/g, '').trim();
+        if (str && EXIF_TAGS[tag]) {
+          findings.push({ label: EXIF_TAGS[tag], value: str, isAi: isAITool(str) });
+        }
+      }
+    }
+  }
+
+  function parseXMP(xmpBuf, findings) {
+    var text = decoder.decode(xmpBuf);
+    checkAIKeywords(text, findings);
+    if (text.indexOf('C2PA') !== -1 || text.indexOf('c2pa') !== -1 || text.indexOf('content_credentials') !== -1) {
+      findings.push({ label: 'C2PA 凭证', value: '发现内容凭证 (Content Credentials)', isAi: true });
+    }
+  }
+
+  function checkEXIFConsistency(buf) {
+    var findings = [];
+    var str = readTextHead(buf, 8192);
+    var hasMake = /Apple|Canon|Nikon|Sony|Samsung|Google|Xiaomi|HUAWEI|OPPO/i.test(str);
+    var hasSoftware = /software/i.test(str);
+
+    if (!hasMake && hasSoftware && /AI|Diffusion|GAN|DALL|Midjourney|Firefly/i.test(str)) {
+      findings.push({ label: '来源分析', value: '无相机信息但有 AI 工具痕迹', isAi: true });
+    }
+    return findings;
+  }
+
+  // -- PNG parsing --
+  function parsePNG(buf) {
+    var findings = [];
+    var offset = 8; // skip signature
+
+    while (offset < buf.length - 8) {
+      var len = new DataView(buf.buffer, buf.byteOffset + offset, 4).getUint32(0);
+      var type = decoder.decode(buf.slice(offset + 4, offset + 8));
+
+      if (type === 'tEXt' || type === 'iTXt' || type === 'zTXt') {
+        var data = buf.slice(offset + 8, offset + 8 + len);
+        var text = '';
+        if (type === 'zTXt') {
+          var j = 0;
+          while (data[j] !== 0 && j < data.length) j++;
+          text = decoder.decode(data.slice(j + 2));
+        } else if (type === 'iTXt') {
+          var k = 0;
+          while (data[k] !== 0 && k < data.length) k++; // keyword
+          k++; // null
+          k++; // compression flag
+          k++; // compression method
+          while (data[k] !== 0 && k < data.length) k++; // language
+          k++; // null
+          text = decoder.decode(data.slice(k));
+        } else {
+          var m = 0;
+          while (data[m] !== 0 && m < data.length) m++;
+          text = decoder.decode(data.slice(m + 1));
+        }
+        checkAIKeywords(text, findings);
+      }
+
+      offset += 12 + len;
+    }
+
+    var textChunk = readTextHead(buf, 8192);
+    checkAIKeywords(textChunk, findings);
+    return findings;
+  }
+
+  // -- Generic parsing --
+  function parseGeneric(buf) {
+    var findings = [];
+    var text = readTextHead(buf, 4096);
+    checkAIKeywords(text, findings);
+    return findings;
+  }
+
+  function displayImageResults(findings, file) {
+    els.cardMetadata.style.display = 'block';
+    els.cardChecklist.style.display = 'block';
+
+    var aiHits = findings.filter(function(f) { return f.isAi; }).length;
+    var totalFindings = findings.length;
+    // Use max(totalFindings, 3) to avoid division-by-zero while keeping a
+    // reasonable baseline for scoring when few metadata fields are present.
+    var score = totalFindings > 0 ? Math.round((aiHits / Math.max(totalFindings, 3)) * 100) : 0;
+
+    var html = '';
+    if (findings.length === 0) {
+      html = '<div class="result-row"><span class="result-label">未发现元数据标记</span><span class="result-value">—</span></div>';
+    } else {
+      findings.forEach(function(f) {
+        html += '<div class="result-row">' +
+          '<span class="result-label">' + f.label + '</span>' +
+          '<span class="result-value">' + f.value + '</span>' +
+        '</div>';
+      });
+    }
+
+    html += '<div class="result-row"><span class="result-label">文件名</span><span class="result-value">' + file.name + '</span></div>';
+    html += '<div class="result-row"><span class="result-label">文件大小</span><span class="result-value">' + formatSize(file.size) + '</span></div>';
+    html += '<div class="result-row"><span class="result-label">文件类型</span><span class="result-value">' + (file.type || '未知') + '</span></div>';
+
+    els.metadataResults.innerHTML = html;
+
+    // Score bar
+    els.imgScoreBar.style.width = score + '%';
+    els.imgScoreBar.style.background = scoreColor(score, SCORE_IMG);
+
+    // Verdict
+    var v = renderVerdict(score, SCORE_IMG, {
+      ai: '疑似 AI 生成',
+      uncertain: '无明确 AI 标记',
+      human: '未检测到 AI 痕迹'
+    });
+    els.imgVerdict.innerHTML = v.html;
+    els.imgVerdict.style.color = v.color;
+  }
+
+  function renderChecklist() {
+    checklistChecked.clear();
+    els.checkCount.textContent = '0';
+    els.checkTotal.textContent = CHECKLIST_ITEMS.length;
+
+    els.checklist.innerHTML = CHECKLIST_ITEMS.map(function(item, i) {
+      return '<li data-index="' + i + '">' +
+        '<div class="check-box">&#10003;</div>' +
+        '<div>' + item.text +
+          '<span class="check-hint">' + item.hint + '</span>' +
+        '</div>' +
+      '</li>';
+    }).join('');
+  }
+
+  // ==================== Text Detection ====================
+  els.textInput.addEventListener('input', function() {
+    els.charCount.textContent = this.value.length + ' 字';
+  });
+
+  $('btn-clear-text').addEventListener('click', function() {
+    els.textInput.value = '';
+    els.charCount.textContent = '0 字';
+    els.cardTextResults.style.display = 'none';
+  });
+
+  $('btn-analyze-text').addEventListener('click', analyzeText);
+
+  function analyzeText() {
+    var text = els.textInput.value.trim();
+    if (text.length < MIN_TEXT_LENGTH) {
+      alert('请至少输入 ' + MIN_TEXT_LENGTH + ' 个字符以获得有意义的分析结果。');
+      return;
+    }
+
+    els.cardTextResults.style.display = 'block';
+
+    var words = text.split(/[\s,，。！？、；：""''（）\(\)\[\]{}…—\-\/\\]+/).filter(function(w) { return w.length > 0; });
+    var sentences = text.split(/[。！？!?\n]+/).filter(function(s) { return s.trim().length > 0; });
+
+    // 1. Type-Token Ratio (vocabulary diversity)
+    var uniqueWords = new Set(words.map(function(w) { return w.toLowerCase(); }));
+    var ttr = words.length > 0 ? uniqueWords.size / words.length : 0;
+
+    // 2. Burstiness (CV of sentence lengths)
+    var sentLengths = sentences.map(function(s) {
+      return s.trim().split(/[\s,，]+/).filter(function(w) { return w.length > 0; }).length;
+    }).filter(function(l) { return l > 0; });
+    var avgSentLen = sentLengths.length > 0 ? sentLengths.reduce(function(a, b) { return a + b; }, 0) / sentLengths.length : 0;
+    var sentVar = sentLengths.length > 0 ?
+      sentLengths.reduce(function(sum, l) { return sum + (l - avgSentLen) * (l - avgSentLen); }, 0) / sentLengths.length : 0;
+    var sentStd = Math.sqrt(sentVar);
+    var burstiness = avgSentLen > 0 ? sentStd / avgSentLen : 0;
+
+    // 3. Repetition: find repeated 3-grams
+    var trigrams = new Map();
+    for (var i = 0; i <= words.length - 3; i++) {
+      var tri = words.slice(i, i + 3).map(function(w) { return w.toLowerCase(); }).join(' ');
+      trigrams.set(tri, (trigrams.get(tri) || 0) + 1);
+    }
+    var repeatedTri = 0;
+    trigrams.forEach(function(v) { if (v >= 3) repeatedTri++; });
+    var repetitionScore = words.length > 0 ? repeatedTri / (words.length / 3) : 0;
+
+    // 4. AI phrase detection
+    var textLower = text.toLowerCase();
+    var phraseHits = 0;
+    for (var p = 0; p < AI_PHRASES.length; p++) {
+      if (textLower.indexOf(AI_PHRASES[p]) !== -1) phraseHits++;
+    }
+    var phraseDensity = words.length > 0 ? phraseHits / (words.length / 50) : 0;
+
+    // 5. Averaged word length variation
+    var wordLengths = words.map(function(w) { return w.length; });
+    var avgWordLen = wordLengths.reduce(function(a, b) { return a + b; }, 0) / wordLengths.length;
+    var wordLenVar = wordLengths.reduce(function(sum, l) { return sum + (l - avgWordLen) * (l - avgWordLen); }, 0) / wordLengths.length;
+    var wordLenStd = Math.sqrt(wordLenVar);
+    var wordLenCV = avgWordLen > 0 ? wordLenStd / avgWordLen : 0;
+
+    // -- Scoring --
+    var ttrScore = Math.max(0, (0.5 - ttr) * 2) * 100;
+    var burstScore = Math.max(0, (0.8 - burstiness) / 0.8) * 100;
+    var repScore = Math.min(repetitionScore * 100, 100);
+    var phraseScore = Math.min(phraseDensity * 30, 100);
+    var wlScore = Math.max(0, (0.5 - wordLenCV) / 0.5) * 100;
+
+    var scores = [
+      { name: '词汇多样性偏低', value: Math.round(ttrScore), color: scoreColor(ttrScore, SCORE_TEXT) },
+      { name: '句式变化度偏低', value: Math.round(burstScore), color: scoreColor(burstScore, SCORE_TEXT) },
+      { name: '高频重复模式', value: Math.round(repScore), color: scoreColor(repScore, SCORE_TEXT) },
+      { name: 'AI 常用短语', value: Math.round(phraseScore), color: scoreColor(phraseScore, SCORE_TEXT) },
+      { name: '词长变化度偏低', value: Math.round(wlScore), color: scoreColor(wlScore, SCORE_TEXT) },
+    ];
+
+    var overallScore = Math.round(scores.reduce(function(s, sc) { return s + sc.value; }, 0) / scores.length);
+
+    // -- Display --
+    var metricsHTML = '';
+    scores.forEach(function(s) {
+      metricsHTML += '<div class="metric">' +
+        '<div class="metric-header">' +
+          '<span class="metric-name">' + s.name + '</span>' +
+          '<span class="metric-value" style="color:' + s.color + '">' + s.value + '%</span>' +
+        '</div>' +
+        '<div class="metric-bar"><div class="metric-fill" style="width:' + s.value + '%;background:' + s.color + '"></div></div>' +
+      '</div>';
+    });
+
+    metricsHTML += '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;color:var(--text-secondary)">' +
+      '总字数: ' + text.length + ' &nbsp;|&nbsp; 词汇数: ' + words.length + ' &nbsp;|&nbsp;' +
+      '独立词汇: ' + uniqueWords.size + ' &nbsp;|&nbsp; 句子数: ' + sentences.length + ' &nbsp;|&nbsp;' +
+      'TTR: ' + ttr.toFixed(3) + ' &nbsp;|&nbsp; Burstiness: ' + burstiness.toFixed(3) +
+    '</div>';
+
+    els.textMetrics.innerHTML = metricsHTML;
+
+    // Score bar
+    els.textScoreBar.style.width = overallScore + '%';
+    els.textScoreBar.style.background = scoreColor(overallScore, SCORE_TEXT);
+
+    // Verdict
+    var v = renderVerdict(overallScore, SCORE_TEXT, {
+      ai: '高概率 AI 生成',
+      uncertain: '不确定',
+      human: '更像人类写作'
+    });
+    els.textVerdict.innerHTML = v.html;
+    els.textVerdict.style.color = v.color;
+
+    var details = overallScore >= SCORE_TEXT.AI ? '文本在词汇多样性、句式变化度等多个维度上呈现 AI 写作的典型特征。注意：本分析仅为启发式判断，不能作为绝对依据。'
+      : overallScore >= SCORE_TEXT.UNCERTAIN ? '文本部分指标接近 AI 写作特征，但不足以做出确定性判断。建议结合其他方法交叉验证。'
+      : '文本在各项指标上表现接近人类写作特征。注意：熟练的提示工程可以绕过检测。';
+    els.textDetails.textContent = details;
+
+    els.cardTextResults.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+})();
+</script>
+</body>
+</html>
